@@ -45,18 +45,45 @@ class Config:
         self.num_vae_data_sample = cfg['num_vae_data_sample']
         self.vae_model_path = os.path.join(self.model_dir , 'vae_%04d.p')
 
-        # dlow
-        self.nk = cfg.get('nk', 5)
-        self.dlow_batch_size = cfg.get('dlow_batch_size', 64)
-        self.dlow_beta = cfg.get('dlow_beta', 0.1)
-        self.d_scale = cfg.get('d_scale', 1)
-        self.lambda_kl = cfg.get('lambda_kl', 1)
-        self.lambda_j = cfg.get('lambda_j', 10)
-        self.lambda_recon = cfg.get('lambda_recon', 0.1)
-        self.neps = cfg.get('neps', 32)
-        self.dlow_lr = cfg.get('dlow_lr', 1e-3)
-        self.dlow_specs = cfg.get('dlow_specs', dict())
-        self.num_dlow_epoch = cfg.get('num_dlow_epoch', 500)
-        self.num_dlow_epoch_fix = cfg.get('num_dlow_epoch_fix', self.num_dlow_epoch)
-        self.num_dlow_data_sample = cfg.get('num_dlow_data_sample', 5000)
-        self.dlow_model_path = os.path.join(self.model_dir, 'dlow_%04d.p')
+        #mae params
+        self.mask_ratio_min = cfg['mask_ratio_min']
+        self.grad_clip = cfg['grad_clip']
+        self.attn_dropout = cfg['attn_dropout']
+        self.proj_dropout = cfg['proj_dropout']
+        self.buffer_size = cfg['buffer_size']
+
+        self.diffloss_d = cfg['diffloss_d']
+        self.diffloss_w = cfg['diffloss_w']
+        self.num_sampling_steps = cfg['num_sampling_steps']
+        self.diffusion_batch_mul = cfg['diffusion_batch_mul']
+        self.temperature = cfg['temperature']
+
+        self.weight_decay = cfg['weight_decay']
+        self.grad_checkpointing = cfg.get('grad_checkpointing', False)
+        self.lr = cfg['lr']
+        self.blr = cfg['blr']
+        self.min_lr = cfg['min_lr']
+        self.lr_schedule = cfg['lr_schedule']
+        self.warmup_epochs = cfg['warmup_epochs']
+        self.ema_rate = cfg['ema_rate']
+
+    def addparams(self, args):
+        # args_dict = vars(args) if hasattr(args, '__dict__') else args
+        # for i in args_dict:
+        #     if hasattr(self, args_dict[i]):
+        #         pass
+        #     else:
+        #         setattr(self, i, args_dict[i])
+        if hasattr(args, '__dict__'):
+            # 如果是 Namespace 对象，获取其 __dict__ 属性
+            args_dict = vars(args)
+            for key, value in args_dict.items():
+                if hasattr(self, key):
+                    pass
+                else:
+                    setattr(self, key, value)
+        elif isinstance(args, dict):
+            # 如果是字典，直接遍历
+            for key, value in args.items():
+                if hasattr(self, key):
+                    setattr(self, key, value)
