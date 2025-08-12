@@ -14,17 +14,25 @@ num_vae_epoch: 500
 num_vae_epoch_fix: 100
 num_vae_data_sample: 5000
 
-nk: 10
-dlow_batch_size: 64
-d_scale: 100
-lambda_j: 25
-lambda_recon: 2.0
-dlow_lr: 1.e-4
-dlow_specs:
-  model_name: NFDiag
-  rnn_type: gru
-  nh_mlp: [1024, 512]
-  x_birnn: false
-num_dlow_epoch: 500
-num_dlow_epoch_fix: 100
-num_dlow_data_sample: 5000
+#following are the  MAE training parameters
+
+mask_ratio_min: 0.7
+grad_clip: 3.0
+attn_dropout: 0.1
+proj_dropout: 0.1
+buffer_size: 64
+
+diffloss_d: 12
+diffloss_w: 1536
+num_sampling_steps: "100"
+diffusion_batch_mul: 1
+temperature: 1.0
+
+weight_decay: 0.02
+grad_checkpointing: false
+lr: null
+blr: 0.001
+min_lr: 0.0
+lr_schedule: constant
+warmup_epochs: 100
+ema_rate: 0.9999

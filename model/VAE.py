@@ -6,7 +6,7 @@ from model.mlp import MLP
 from model.rnn import RNN
 from utils.torch_utils import *
 
-
+#adapet from Dlow https://github.com/Khrylx/DLow
 class VAE(nn.Module):
     def __init__(self, nx, ny, nz, horizon, specs):
         super(VAE, self).__init__()
@@ -53,7 +53,8 @@ class VAE(nn.Module):
         h_y = self.encode_y(y)
         h = torch.cat((h_x, h_y), dim=1)
         h = self.e_mlp(h)
-        return self.e_mu(h), self.e_logvar(h)
+        # print('隐藏中间变量的shape：',h.shape) 64*200
+        return self.e_mu(h), self.e_logvar(h),h
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
@@ -79,7 +80,7 @@ class VAE(nn.Module):
         return y
 
     def forward(self, x, y):
-        mu, logvar = self.encode(x, y)
+        mu, logvar,_ = self.encode(x, y)
         z = self.reparameterize(mu, logvar) if self.training else mu
         return self.decode(x, z), mu, logvar
 
@@ -87,137 +88,152 @@ class VAE(nn.Module):
         z = torch.randn((x.shape[1], self.nz), device=x.device)
         return self.decode(x, z)
 
-
-class NFDiag(nn.Module):
-    def __init__(self, nx, ny, nk, specs):
-        super(NFDiag, self).__init__()
-        self.nx = nx
-        self.ny = ny
-        self.nk = nk
-        self.nh = nh = specs.get('nh_mlp', [300, 200])
-        self.nh_rnn = nh_rnn = specs.get('nh_rnn', 128)
-        self.rnn_type = rnn_type = specs.get('rnn_type', 'gru')
-        self.x_birnn = x_birnn = specs.get('x_birnn', False)
-        self.fix_first = fix_first = specs.get('fix_first', False)
-        self.nac = nac = nk - 1 if fix_first else nk
-        self.x_rnn = RNN(nx, nh_rnn, bi_dir=x_birnn, cell_type=rnn_type)
-        self.mlp = MLP(nh_rnn, nh)
-        self.head_A = nn.Linear(nh[-1], ny * nac)
-        self.head_b = nn.Linear(nh[-1], ny * nac)
-
-    def encode_x(self, x):
-        if self.x_birnn:
-            h_x = self.x_rnn(x).mean(dim=0)
-        else:
-            h_x = self.x_rnn(x)[-1]
-        return h_x
-
-    def encode(self, x, y):
-        if self.fix_first:
-            z = y
-        else:
-            h_x = self.encode_x(x)
-            h = self.mlp(h_x)
-            a = self.head_A(h).view(-1, self.nk, self.ny)[:, 0, :]
-            b = self.head_b(h).view(-1, self.nk, self.ny)[:, 0, :]
-            z = (y - b) / a
-        return z
-
-    def forward(self, x, z=None):
-        h_x = self.encode_x(x)
-        if z is None:
-            z = torch.randn((h_x.shape[0], self.ny), device=x.device)
-        z = z.repeat_interleave(self.nk, dim=0)
-        h = self.mlp(h_x)
-        if self.fix_first:
-            a = self.head_A(h).view(-1, self.nac, self.ny)
-            b = self.head_b(h).view(-1, self.nac, self.ny)
-            a = torch.cat((ones(h_x.shape[0], 1, self.ny, device=x.device), a), dim=1).view(-1, self.ny)
-            b = torch.cat((zeros(h_x.shape[0], 1, self.ny, device=x.device), b), dim=1).view(-1, self.ny)
-        else:
-            a = self.head_A(h).view(-1, self.ny)
-            b = self.head_b(h).view(-1, self.ny)
-        y = a * z + b
-        return y, a, b
-
-    def sample(self, x, z=None):
-        return self.forward(x, z)[0]
-
-    def get_kl(self, a, b):
-        var = a ** 2
-        KLD = -0.5 * torch.sum(1 + var.log() - b.pow(2) - var)
-        return KLD
+class GaussianDistributionSamper():
+    def __init__(self, mu, logvar,deterministic=False):
+        self.mu = mu
+        self.logvar = logvar
+        self.device = mu.device
 
 
-class NFFull(nn.Module):
-    def __init__(self, nx, ny, nk, specs):
-        super(NFFull, self).__init__()
-        self.nx = nx
-        self.ny = ny
-        self.nk = nk
-        self.nh = nh = specs.get('nh_mlp', [300, 200])
-        self.nh_rnn = nh_rnn = specs.get('nh_rnn', 128)
-        self.rnn_type = rnn_type = specs.get('rnn_type', 'gru')
-        self.x_birnn = x_birnn = specs.get('x_birnn', False)
-        self.fix_first = fix_first = specs.get('fix_first', False)
-        self.nac = nac = nk - 1 if fix_first else nk
-        self.x_rnn = RNN(nx, nh_rnn, bi_dir=x_birnn, cell_type=rnn_type)
-        self.mlp = MLP(nh_rnn, nh)
-        self.head_A = nn.Linear(nh[-1], (ny * ny) * nac)
-        self.head_b = nn.Linear(nh[-1], ny * nac)
+    def sample(self):
+        x = self.mean + self.std * torch.randn(self.mean.shape).to(
+            device=self.device
+        )
+        return x
 
-    def encode_x(self, x):
-        if self.x_birnn:
-            h_x = self.x_rnn(x).mean(dim=0)
-        else:
-            h_x = self.x_rnn(x)[-1]
-        return h_x
+# class NFDiag(nn.Module):
+#     def __init__(self, nx, ny, nk, specs):
+#         super(NFDiag, self).__init__()
+#         self.nx = nx
+#         self.ny = ny
+#         self.nk = nk
+#         self.nh = nh = specs.get('nh_mlp', [300, 200])
+#         self.nh_rnn = nh_rnn = specs.get('nh_rnn', 128)
+#         self.rnn_type = rnn_type = specs.get('rnn_type', 'gru')
+#         self.x_birnn = x_birnn = specs.get('x_birnn', False)
+#         self.fix_first = fix_first = specs.get('fix_first', False)
+#         self.nac = nac = nk - 1 if fix_first else nk
+#         self.x_rnn = RNN(nx, nh_rnn, bi_dir=x_birnn, cell_type=rnn_type)
+#         self.mlp = MLP(nh_rnn, nh)
+#         self.head_A = nn.Linear(nh[-1], ny * nac)
+#         self.head_b = nn.Linear(nh[-1], ny * nac)
+#
+#     def encode_x(self, x):
+#         if self.x_birnn:
+#             h_x = self.x_rnn(x).mean(dim=0)
+#         else:
+#             h_x = self.x_rnn(x)[-1]
+#         return h_x
+#
+#     def encode(self, x, y):
+#         if self.fix_first:
+#             z = y
+#         else:
+#             h_x = self.encode_x(x)
+#             h = self.mlp(h_x)
+#             a = self.head_A(h).view(-1, self.nk, self.ny)[:, 0, :]
+#             b = self.head_b(h).view(-1, self.nk, self.ny)[:, 0, :]
+#             z = (y - b) / a
+#         return z
+#
+#     def forward(self, x, z=None):
+#         h_x = self.encode_x(x)
+#         if z is None:
+#             z = torch.randn((h_x.shape[0], self.ny), device=x.device)
+#         z = z.repeat_interleave(self.nk, dim=0)
+#         h = self.mlp(h_x)
+#         if self.fix_first:
+#             a = self.head_A(h).view(-1, self.nac, self.ny)
+#             b = self.head_b(h).view(-1, self.nac, self.ny)
+#             a = torch.cat((ones(h_x.shape[0], 1, self.ny, device=x.device), a), dim=1).view(-1, self.ny)
+#             b = torch.cat((zeros(h_x.shape[0], 1, self.ny, device=x.device), b), dim=1).view(-1, self.ny)
+#         else:
+#             a = self.head_A(h).view(-1, self.ny)
+#             b = self.head_b(h).view(-1, self.ny)
+#         y = a * z + b
+#         return y, a, b
+#
+#     def sample(self, x, z=None):
+#         return self.forward(x, z)[0]
+#
+#     def get_kl(self, a, b):
+#         var = a ** 2
+#         KLD = -0.5 * torch.sum(1 + var.log() - b.pow(2) - var)
+#         return KLD
+#
+#
+# class NFFull(nn.Module):
+#     def __init__(self, nx, ny, nk, specs):
+#         super(NFFull, self).__init__()
+#         self.nx = nx
+#         self.ny = ny
+#         self.nk = nk
+#         self.nh = nh = specs.get('nh_mlp', [300, 200])
+#         self.nh_rnn = nh_rnn = specs.get('nh_rnn', 128)
+#         self.rnn_type = rnn_type = specs.get('rnn_type', 'gru')
+#         self.x_birnn = x_birnn = specs.get('x_birnn', False)
+#         self.fix_first = fix_first = specs.get('fix_first', False)
+#         self.nac = nac = nk - 1 if fix_first else nk
+#         self.x_rnn = RNN(nx, nh_rnn, bi_dir=x_birnn, cell_type=rnn_type)
+#         self.mlp = MLP(nh_rnn, nh)
+#         self.head_A = nn.Linear(nh[-1], (ny * ny) * nac)
+#         self.head_b = nn.Linear(nh[-1], ny * nac)
+#
+#     def encode_x(self, x):
+#         if self.x_birnn:
+#             h_x = self.x_rnn(x).mean(dim=0)
+#         else:
+#             h_x = self.x_rnn(x)[-1]
+#         return h_x
+#
+#     def encode(self, x, y):
+#         z = y
+#         return z
+#
+#     def forward(self, x, z=None):
+#         h_x = self.encode_x(x)
+#         if z is None:
+#             z = torch.randn((h_x.shape[0], self.ny, 1), device=x.device)
+#         else:
+#             z = z.unsqueeze(2)
+#         z = z.repeat_interleave(self.nk, dim=0)
+#         h = self.mlp(h_x)
+#         if self.fix_first:
+#             A = self.head_A(h).view(-1, self.nac, self.ny, self.ny)
+#             b = self.head_b(h).view(-1, self.nac, self.ny)
+#             cA = torch.eye(self.ny, device=x.device).repeat((h_x.shape[0], 1, 1, 1))
+#             A = torch.cat((cA, A), dim=1).view(-1, self.ny, self.ny)
+#             b = torch.cat((zeros(h_x.shape[0], 1, self.ny, device=x.device), b), dim=1).view(-1, self.ny)
+#         else:
+#             A = self.head_A(h).view(-1, self.ny, self.ny)
+#             b = self.head_b(h).view(-1, self.ny)
+#         y = A.bmm(z).squeeze(-1) + b
+#         return y, A, b
+#
+#     def sample(self, x, z=None):
+#         return self.forward(x, z)[0]
+#
+#     def get_kl(self, A, b):
+#         var = A.bmm(A.transpose(1, 2))
+#         KLD = -0.5 * (A.shape[-1] + torch.log(torch.det(var)) - b.pow(2).sum(dim=1) - (A * A).sum(dim=-1).sum(dim=-1))
+#         return KLD.sum()
 
-    def encode(self, x, y):
-        z = y
-        return z
 
-    def forward(self, x, z=None):
-        h_x = self.encode_x(x)
-        if z is None:
-            z = torch.randn((h_x.shape[0], self.ny, 1), device=x.device)
-        else:
-            z = z.unsqueeze(2)
-        z = z.repeat_interleave(self.nk, dim=0)
-        h = self.mlp(h_x)
-        if self.fix_first:
-            A = self.head_A(h).view(-1, self.nac, self.ny, self.ny)
-            b = self.head_b(h).view(-1, self.nac, self.ny)
-            cA = torch.eye(self.ny, device=x.device).repeat((h_x.shape[0], 1, 1, 1))
-            A = torch.cat((cA, A), dim=1).view(-1, self.ny, self.ny)
-            b = torch.cat((zeros(h_x.shape[0], 1, self.ny, device=x.device), b), dim=1).view(-1, self.ny)
-        else:
-            A = self.head_A(h).view(-1, self.ny, self.ny)
-            b = self.head_b(h).view(-1, self.ny)
-        y = A.bmm(z).squeeze(-1) + b
-        return y, A, b
-
-    def sample(self, x, z=None):
-        return self.forward(x, z)[0]
-
-    def get_kl(self, A, b):
-        var = A.bmm(A.transpose(1, 2))
-        KLD = -0.5 * (A.shape[-1] + torch.log(torch.det(var)) - b.pow(2).sum(dim=1) - (A * A).sum(dim=-1).sum(dim=-1))
-        return KLD.sum()
-
-
-def get_vae_model(cfg, traj_dim):
+def get_vae_model(cfg, traj_dim,load_path=None):
     specs = cfg.vae_specs
     model_name = specs.get('model_name', 'VAEv1')
-    if model_name == 'VAEv1':
+    if model_name == 'VAEv1' and load_path==None :
         return VAE(traj_dim, traj_dim, cfg.nz, cfg.t_pred, specs)
-
+    elif model_name == 'VAEv1' and load_path is not None:
+        model = VAE(traj_dim, traj_dim, cfg.nz, cfg.t_pred, specs)
+        model.load_state_dict(torch.load(load_path))
+        return model
 
 def get_dlow_model(cfg, traj_dim):
     specs = cfg.dlow_specs
     model_name = specs.get('model_name', 'NFDiag')
-    if model_name == 'NFDiag':
-        return NFDiag(traj_dim, cfg.nz, cfg.nk, specs)
-    elif model_name == 'NFFull':
-        return NFFull(traj_dim, cfg.nz, cfg.nk, specs)
+    # if model_name == 'NFDiag':
+    #     return NFDiag(traj_dim, cfg.nz, cfg.nk, specs)
+    # elif model_name == 'NFFull':
+    #     return NFFull(traj_dim, cfg.nz, cfg.nk, specs)
 
